@@ -1,3 +1,3 @@
-# sci-utils
+# sciutils
 
 Various utilities for scientific computing.
