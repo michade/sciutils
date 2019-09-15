@@ -20,8 +20,10 @@ from sciutils.timer import Timer
 class RpcQueue(object):
     FINISHED_TOKEN = 'FINISHED'
 
-    def __init__(self):
-        self._queue = mp.Queue()
+    def __init__(self, queue=mp.Queue):
+        if callable(queue):
+            queue = queue()
+        self._queue = queue
         self._targets: Dict = {}
         self._is_finished = False
         self._n_producers = 0
@@ -54,11 +56,11 @@ class RpcQueue(object):
     def get_object_key(self, obj):
         return obj.rpc_id
 
-    def serialize_method(self, method):
+    def _serialize_method(self, method):
         serialized = method.__name__
         return serialized
 
-    def deserialize_method(self, target, serialized):
+    def _deserialize_method(self, target, serialized):
         method = getattr(target, serialized)
         return method
 
@@ -82,7 +84,7 @@ class RpcQueue(object):
         self.put_raw(method.__self__, method, args, kwargs)
 
     def put_raw(self, target, method, args, kwargs):
-        msg = (self.get_object_key(target), self.serialize_method(method), args, kwargs)
+        msg = (self.get_object_key(target), self._serialize_method(method), args, kwargs)
         self._queue.put(msg)
 
     def get(self):
@@ -91,7 +93,7 @@ class RpcQueue(object):
             return None
         key, serialized_method, args, kwargs = msg
         target = self._targets[key]
-        method = self.deserialize_method(target, serialized_method)
+        method = self._deserialize_method(target, serialized_method)
         return method, args, kwargs
 
     def finish(self):
@@ -208,7 +210,11 @@ class Job(object):
 
 
 class Worker(object):
-    def __init__(self, worker_id: int, job_queue: RpcQueue, msg_queue: RpcQueue, log_queue: mp.Queue, suppress_exceptions=False):
+    def __init__(
+            self, worker_id: int,
+            job_queue: RpcQueue, msg_queue: RpcQueue, log_queue: mp.Queue,
+            suppress_exceptions=False
+    ):
         self._pid = None
         self._worker_id = worker_id
         self._chained_jobs = None
@@ -353,16 +359,17 @@ class JobRunner(object):
             self,
             n_workers: Optional[int],
             suppress_exceptions: bool = False,
-            logging_handlers: Union[None, str, int, List] = None
+            logging_handlers: Union[None, str, int, List] = None,
+            _queue_class=mp.Queue
     ):
         if n_workers is None or n_workers == 0:
             n_workers = mp.cpu_count()
         self._n_workers = n_workers
         self._worker_processes: Optional[List[WorkerProcess]] = None
         self._tmp_job_queue = deque()
-        self._job_queue = RpcQueue()
-        self._msg_queue = RpcQueue()
-        self._log_queue = mp.Queue()
+        self._job_queue = RpcQueue(queue=_queue_class)
+        self._msg_queue = RpcQueue(queue=_queue_class)
+        self._log_queue = _queue_class()
         self._log_listener = None
         self._logging_handlers = logging_handlers
         self._local_worker = None
