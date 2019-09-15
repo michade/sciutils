@@ -1,5 +1,6 @@
 import pandas as pd
 
+
 CHROMOSOMES = ['chr%d' % i for i in range(1, 22 + 1)] + ['chrX', 'chrY', 'chrM']
 
 RAW_DATA_FILES = {
