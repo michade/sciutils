@@ -208,6 +208,21 @@ class Job(object):
     def run(self, *args, **kwargs):
         pass
 
+    def report_results(self, *attrs):
+        data = [(attr, getattr(self, attr)) for attr in attrs]
+        self._assign_attrs(data)
+
+    def reduce_results(self, current_data, new_data) -> List:
+        return new_data
+
+    @local
+    def _assign_attrs(self, new_data):
+        attrs = [attr for attr, _ in new_data]
+        current_data = [getattr(self, attr) for attr in attrs]
+        merged_data = self.reduce_results(current_data, [val for _, val in new_data])
+        for attr, val in zip(attrs, merged_data):
+            setattr(self, attr, val)
+
 
 class Worker(object):
     def __init__(

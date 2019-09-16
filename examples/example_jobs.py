@@ -277,6 +277,36 @@ def logging_example():
     print('Exited.')
 
 
+class DataTransferJob(Job):
+    def __init__(self):
+        super(DataTransferJob, self).__init__()
+        self.attr1 = 0
+        self.attr2 = []
+
+    def run(self, k, dt):
+        self.print(f'{k}...')
+        if k > 0:
+            time.sleep(dt)
+            self.schedule_job(self, k - 1, dt)
+            self.attr1 = k
+            self.attr2 = [k]
+            self.report_results('attr1', 'attr2')
+
+    def reduce_results(self, current_data, new_data):
+        return [
+            current_data[0] + new_data[0],
+            current_data[1] + new_data[1]
+        ]
+
+
+def data_transfer_example():
+    job = DataTransferJob()
+    with JobRunner(2) as runner:
+        runner.schedule_job(job, 3, 0.1)
+    print(f'attr1={job.attr1} attr2={job.attr2}')
+    print('Exited.')
+
+
 def main():
     mp.set_start_method('fork')  # unnecessary, but for the record (this is the default for linux)
     print(f'Main process pid={os.getpid()}, the start method is "{mp.get_start_method(True)}".')
@@ -292,6 +322,8 @@ def main():
     exception_example()
     print('LOGGING ' + '=' * 40)
     logging_example()
+    print('DATA TRANSFER ' + '=' * 40)
+    data_transfer_example()
 
 
 if __name__ == "__main__":
