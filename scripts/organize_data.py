@@ -1,9 +1,11 @@
 #!/usr/bin/env python
+# -*- coding: utf-8 -*-
 
 import argparse
 import os
 
 from chiapet.chiapet import ChiapetData
+from sciutils.timer import Timer
 
 
 def main() -> None:
@@ -20,8 +22,10 @@ def main() -> None:
     assert os.path.exists(output_dir)
     assert os.access(output_dir, os.W_OK)
 
-    data = ChiapetData(args.output_dir)
-    data.organize_data(args.raw_data_dir)
+    with Timer() as t:
+        data = ChiapetData(args.output_dir)
+        data.organize_data(args.raw_data_dir)
+    print(f'Done organizing in {t.elapsed:.2f}s')
 
 
 if __name__ == '__main__':

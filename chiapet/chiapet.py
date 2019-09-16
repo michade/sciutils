@@ -6,13 +6,14 @@ import csv
 import os
 import re
 import time
-from typing import List, Optional
+from typing import Tuple, List, Optional, Generator
 
 import pandas as pd
 import networkx as nx
 
-from ..sciutils.partial import ProperPartial
-from .data_specific import RAW_CHIAPET_FILE_COLUMNS, RAW_BED_FILE_COLUMNS, RAW_DATA_FILES, CHROMOSOMES
+from sciutils.partial import ProperPartial
+from .data_specific import RAW_CHIAPET_FILE_COLUMNS, RAW_BED_FILE_COLUMNS, RAW_DATA_FILES, CHROMOSOMES, ChromosomeDtype
+from .points_in_regions import points_in_disjoint_regions
 
 
 def load_raw_chiapet_text_file(file_path: str) -> pd.DataFrame:
@@ -40,10 +41,13 @@ def load_raw_bed_file(file_path: str) -> pd.DataFrame:
         names=[name for name, _ in RAW_BED_FILE_COLUMNS],
         dtype={name: dtype for name, dtype in RAW_BED_FILE_COLUMNS},
         engine='c',
-        quoting=csv.QUOTE_NONE
+        quoting=csv.QUOTE_NONE,
     )
     return df
 
+
+def save_raw_bed_file(df: pd.DataFrame, file_path: str):
+    df.to_csv(file_path, sep='\t', header=False, index=False)
 
 
 def write_pandas_to_raw_chiapet_text_file(df: pd.DataFrame, file_path: str) -> None:
@@ -208,46 +212,98 @@ class ChiapetLoader(object):
         return self._chiapet_data.load_regions(path, regions)
 
 
-def as_normalized_tables(df, use_midpoints=True):
-    anchor_id_parts = ['chrom', 'start', 'end']
-    anch_id_A = ['A_' + s for s in anchor_id_parts]
-    anch_id_B = ['B_' + s for s in anchor_id_parts]
+_ANCHOR_ID_PARTS = ['chrom', 'start', 'end']
+_ANCHOR_ID_A = ['A_' + s for s in _ANCHOR_ID_PARTS]
+_ANCHOR_ID_B = ['B_' + s for s in _ANCHOR_ID_PARTS]
 
-    an1 = df[anch_id_A]
-    an1.columns = anchor_id_parts
-    an2 = df[anch_id_B]
-    an2.columns = anchor_id_parts
+
+def _select_contacts_by_anchors(anchors: pd.DataFrame, contacts: pd.DataFrame) -> pd.DataFrame:
+    contacts = pd.merge(
+        contacts, anchors.reset_index().rename(
+            columns=dict(zip(_ANCHOR_ID_PARTS, _ANCHOR_ID_A))
+        ),
+        on=_ANCHOR_ID_A
+    )
+    contacts = pd.merge(
+        contacts, anchors.reset_index().rename(
+            columns=dict(zip(_ANCHOR_ID_PARTS, _ANCHOR_ID_B))
+        ),
+        on=_ANCHOR_ID_B,
+        suffixes=['_A', '_B']
+    )
+    contacts.index.names = ['contact_id']
+    return contacts
+
+
+def as_normalized_tables(df, use_midpoints=True):
+    an1 = df[_ANCHOR_ID_A]
+    an1.columns = _ANCHOR_ID_PARTS
+    an2 = df[_ANCHOR_ID_B]
+    an2.columns = _ANCHOR_ID_PARTS
     anchors = pd.concat([an1, an2], axis=0, ignore_index=True, sort=False)
-    anchors.columns = anchor_id_parts
-    anchors = anchors.drop_duplicates(subset=anchor_id_parts, keep='first')
+    anchors.columns = _ANCHOR_ID_PARTS
+    anchors = anchors.drop_duplicates(subset=_ANCHOR_ID_PARTS, keep='first')
     if use_midpoints:
         anchors['mid'] = (anchors.start + anchors.end) // 2
         sort_cols = ['chrom', 'mid']
     else:
-        sort_cols = anchor_id_parts
+        sort_cols = _ANCHOR_ID_PARTS
     anchors.sort_values(by=sort_cols, inplace=True)
     anchors = anchors.reset_index(drop=True)
     anchors.index.names = ['anchor_id']
 
-    contacts = df
-    contacts = pd.merge(
-        contacts, anchors.reset_index().rename(
-            columns=dict(zip(anchor_id_parts, anch_id_A))
-        ),
-        on=anch_id_A
-    )
-    contacts = pd.merge(
-        contacts, anchors.reset_index().rename(
-            columns=dict(zip(anchor_id_parts, anch_id_B))
-        ),
-        on=anch_id_B,
-        suffixes=['_A', '_B']
-    )
-    contacts.index.names = ['contact_id']
+    contacts = _select_contacts_by_anchors(anchors, df)
 
     # reorder columns & get rid of coords
     contacts = contacts[['anchor_id_A', 'anchor_id_B', 'petcount']]
     return anchors, contacts  # TODO: copy to prevent set-on-view issues?
+
+
+def anchor_midpoints_in_regions(anchors: pd.DataFrame, regions: pd.DataFrame, add_chrom_col: bool = False) -> pd.DataFrame:
+    chromosomes = sorted(regions.chrom.unique())
+
+    results = []
+    for chrom in chromosomes:
+        chrom_anchors = anchors[anchors.chrom == chrom]
+        chrom_regions = regions[regions.chrom == chrom]
+        id_pairs = points_in_disjoint_regions(
+            chrom_anchors.anchor_id.values,
+            chrom_anchors.mid.values,
+            chrom_regions.region_id.values,
+            chrom_regions.start.values,
+            chrom_regions.end.values
+        )
+        chrom_df = pd.DataFrame(id_pairs, copy=False)
+        chrom_df.columns = ['anchor_id', 'region_id']
+        results.append(chrom_df)
+
+    if add_chrom_col:
+        df = pd.concat(results, keys=chromosomes, sort=False, names=['chrom']).reset_index('chrom')
+        df['chrom'] = df.chrom.astype(ChromosomeDtype)
+        df = df.reset_index(drop=True)
+    else:
+        df = pd.concat(results, sort=False, ignore_index=True)
+    return df
+
+
+def split_by_regions(anchors: pd.DataFrame, contacts: pd.DataFrame, regions: pd.DataFrame, midpoints=False) -> Generator[Tuple[int, Tuple[str, int, int], pd.DataFrame]]:
+    pairings = anchor_midpoints_in_regions(anchors.reset_index(), regions.reset_index())
+    for reg_id, reg_pairing in pairings.groupby('region_id'):
+        reg_anchors_set = set(reg_pairing.anchor_id)
+        reg_contacts = contacts[contacts.anchor_id_A.isin(reg_anchors_set) & contacts.anchor_id_B.isin(reg_anchors_set)]
+        if midpoints:
+            reg_anchors = anchors[anchors.index.isin(reg_anchors_set)].reset_index()
+            reg_mid = reg_contacts
+            reg_mid = pd.merge(reg_mid, reg_anchors[['anchor_id', 'mid']].rename(
+                columns={'anchor_id': 'anchor_id_A', 'mid': 'mid_A'}
+            ), on='anchor_id_A')
+            reg_mid = pd.merge(reg_mid, reg_anchors[['anchor_id', 'mid']].rename(
+                columns={'anchor_id': 'anchor_id_B', 'mid': 'mid_B'}
+            ), on='anchor_id_B')
+            res = reg_mid
+        else:
+            res = reg_contacts
+        yield reg_id, tuple(regions.loc[reg_id]), res
 
 
 def as_nx_graph(anchors, contacts, petcounts='petcount', drop_isolated_nodes=True):

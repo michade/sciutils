@@ -23,6 +23,8 @@ ChromosomeDtype = pd.api.types.CategoricalDtype(
     ordered=True
 )
 
+pd.api.types.CategoricalDtype()
+
 RAW_CHIAPET_FILE_COLUMNS = [
     ('A_chrom', ChromosomeDtype),
     ('A_start', 'int32'),
