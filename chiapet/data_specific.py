@@ -32,3 +32,9 @@ RAW_CHIAPET_FILE_COLUMNS = [
     ('B_end', 'int32'),
     ('petcount', 'int32')
 ]
+
+RAW_BED_FILE_COLUMNS = [
+    ('chrom', ChromosomeDtype),
+    ('start', 'int32'),
+    ('end', 'int32')
+]

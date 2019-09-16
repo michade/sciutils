@@ -9,11 +9,11 @@ import pandas as pd
 def anchor_midpoints_in_regions(anchors, regions):
     # get columns
     # TODO: not sure how to control the dtype of categoricals
-    cdef const char [:] an_chr_col = anchors.chr.cat.codes.values
-    cdef const int [:] an_x_col = anchors.midpoint.values
+    cdef const char [:] an_chrom_col = anchors.chrom.cat.codes.values
+    cdef const int [:] an_x_col = anchors.mid.values
     cdef const long [:] an_id_col = anchors.anchor_id.values
     cdef const long [:] reg_id_col = regions.region_id.values
-    cdef const char [:] reg_chr_col = regions.chr.cat.codes.values
+    cdef const char [:] reg_chrom_col = regions.chrom.cat.codes.values
     cdef const int [:] reg_s_col = regions.start.values
     cdef const int [:] reg_e_col = regions.end.values
 
@@ -27,14 +27,14 @@ def anchor_midpoints_in_regions(anchors, regions):
     cdef int j = 0  # array index for regions
     cdef int k = 0  # array index for pre-allocatedd output array
     while i < pt_N and j < reg_N:
-        pt_chr = an_chr_col[i]
+        pt_chrom = an_chrom_col[i]
         pt_x = an_x_col[i]
-        reg_chr = reg_chr_col[j]
+        reg_chrom = reg_chrom_col[j]
         reg_s = reg_s_col[j]
         reg_e = reg_e_col[j]
-        if pt_chr < reg_chr:
+        if pt_chrom < reg_chrom:
             i += 1
-        elif pt_chr > reg_chr:
+        elif pt_chrom > reg_chrom:
             j += 1
         else:
             if pt_x < reg_s:

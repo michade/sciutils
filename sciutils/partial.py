@@ -22,6 +22,12 @@ class ProperPartial(object):
         final_args, final_kwargs = self.merge_arguments(new_bound_args)
         return self._fun(*final_args, **final_kwargs)
 
+    def __getitem__(self, item):
+        return self._bound_args.arguments[item]
+
+    def __contains__(self, item):
+        return item in self._bound_args.arguments
+
     @staticmethod
     def split_parameters(parameters):
         pos = []

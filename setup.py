@@ -7,7 +7,7 @@ from setuptools import setup, Extension, find_packages
 
 ext_modules = [
     Extension(
-        'points_in_regions',
+        'chiapet.points_in_regions',
         ['chiapet/points_in_regions.pyx'],
         extra_compile_args=['-fopenmp'],  # TODO: Check if this is still required
         extra_link_args=['-fopenmp']

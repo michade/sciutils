@@ -6,14 +6,14 @@ import csv
 import os
 import re
 import time
-from typing import List
+from typing import List, Optional
 
 import pandas as pd
 import networkx as nx
 
 
 from sciutils.partial import ProperPartial
-from .data_specific import RAW_CHIAPET_FILE_COLUMNS, RAW_DATA_FILES, CHROMOSOMES
+from .data_specific import RAW_CHIAPET_FILE_COLUMNS, RAW_BED_FILE_COLUMNS, RAW_DATA_FILES, CHROMOSOMES
 
 
 def load_raw_chiapet_text_file(file_path: str) -> pd.DataFrame:
@@ -29,6 +29,22 @@ def load_raw_chiapet_text_file(file_path: str) -> pd.DataFrame:
         quoting=csv.QUOTE_NONE
     )
     return df
+
+
+def load_raw_bed_file(file_path: str) -> pd.DataFrame:
+    df = pd.read_csv(
+        file_path,
+        sep='\t',
+        header=None,
+        index_col=False,
+        usecols=range(3),
+        names=[name for name, _ in RAW_BED_FILE_COLUMNS],
+        dtype={name: dtype for name, dtype in RAW_BED_FILE_COLUMNS},
+        engine='c',
+        quoting=csv.QUOTE_NONE
+    )
+    return df
+
 
 
 def write_pandas_to_raw_chiapet_text_file(df: pd.DataFrame, file_path: str) -> None:
@@ -165,20 +181,32 @@ class ChiapetData(object):
     def loader(self, *args, **kwargs) -> ChiapetLoader:
         return ChiapetLoader(self, *args, **kwargs)
 
+    def load_regions(self, path: str, regions: Optional[List[str]] = None):
+        df = load_raw_bed_file(path)
+        if regions is not None:
+            chromosomes = set(regions)
+            df = df[df.chrom.isin(chromosomes)]
+        df.index.names = ['region_id']
+        return df
+
 
 class ChiapetLoader(object):
     def __init__(self, chiapet_data: ChiapetData, *args, **kwargs):
         self._chiapet_data = chiapet_data
-        partial = ProperPartial(self.load_impl, *args, **kwargs)
-        self.load = partial
+        load_partial = ProperPartial(self.load_impl, *args, **kwargs)
+        self.load = load_partial
 
     def load_impl(
             self,
             celline: str, target_protein: str, kind: str,
             regions: List[str], min_petcount: int
     ) -> pd.DataFrame:
-        # mainly for IDEs to hint parameters.
         return self._chiapet_data.load_data(celline, target_protein, kind, regions, min_petcount)
+
+    def load_regions(self, path: str, regions: Optional[List[str]] = None):
+        if regions is None and 'regions' in self.load:
+            regions = self.load['regions']
+        return self._chiapet_data.load_regions(path, regions)
 
 
 def as_normalized_tables(df, use_midpoints=True):
