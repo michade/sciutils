@@ -300,9 +300,9 @@ def split_by_regions(anchors: pd.DataFrame, contacts: pd.DataFrame, regions: pd.
             reg_mid = pd.merge(reg_mid, reg_anchors[['anchor_id', 'mid']].rename(
                 columns={'anchor_id': 'anchor_id_B', 'mid': 'mid_B'}
             ), on='anchor_id_B')
-            res = reg_mid
+            res = reg_mid.sort_values(['mid_A', 'mid_B'])
         else:
-            res = reg_contacts
+            res = reg_contacts.sort_values(['anchor_id_A', 'anchor_id_B'])
         yield reg_id, tuple(regions.loc[reg_id]), res
 
 

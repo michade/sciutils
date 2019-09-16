@@ -19,32 +19,31 @@ def example(data_dir, chromosomes, petcount, regions_file_path):
 
     with t:
         data = loader.load(chromosomes, petcount)
-    # print(f'Loaded {chromosomes}, PET{petcount}+ in {t.elapsed:.2f}s')
-    # print(data)
+    print(f'Loaded {chromosomes}, PET{petcount}+ in {t.elapsed:.2f}s')
+    print(data)
 
     with t:
         anchors, contacts = chiapet.as_normalized_tables(data)
-    # print(f'Normalized {chromosomes}, PET{petcount}+ data prepared in {t.elapsed:.2f}s')
-    # print(anchors)
-    # print(contacts)
+    print(f'Normalized {chromosomes}, PET{petcount}+ data prepared in {t.elapsed:.2f}s')
+    print(anchors)
+    print(contacts)
 
-    # with t:
-    #     graph = chiapet.as_nx_graph(anchors, contacts)
-    # print(f'Graph for {chromosomes}, PET{petcount}+ created in {t.elapsed:.2f}s')
-    # print(f'|V|={graph.number_of_nodes()}, |E|={graph.number_of_edges()}, |CC|={nx.number_connected_components(graph)}')
+    with t:
+        graph = chiapet.as_nx_graph(anchors, contacts)
+    print(f'Graph for {chromosomes}, PET{petcount}+ created in {t.elapsed:.2f}s')
+    print(f'|V|={graph.number_of_nodes()}, |E|={graph.number_of_edges()}, |CC|={nx.number_connected_components(graph)}')
 
     with t:
         regions = loader.load_regions(regions_file_path, chromosomes)
-    # print(f'Regions for {chromosomes} loaded in {t.elapsed:.2f}s')
-    # print(regions)
+    print(f'Regions for {chromosomes} loaded in {t.elapsed:.2f}s')
+    print(regions)
 
     with t:
         for _, reg, df in chiapet.split_by_regions(anchors, contacts, regions):
             print('*' * 40)
             print(reg)
             print(df)
-    #print(f'Anchors mapped to regions for {chromosomes}, PET{petcount}+ in {t.elapsed:.2f}s')
-    #print(pairs)
+    print(f'Anchors mapped to regions for {chromosomes}, PET{petcount}+ in {t.elapsed:.2f}s')
 
 
 def main():
