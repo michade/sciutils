@@ -11,8 +11,7 @@ from typing import List, Optional
 import pandas as pd
 import networkx as nx
 
-
-from sciutils.partial import ProperPartial
+from ..sciutils.partial import ProperPartial
 from .data_specific import RAW_CHIAPET_FILE_COLUMNS, RAW_BED_FILE_COLUMNS, RAW_DATA_FILES, CHROMOSOMES
 
 

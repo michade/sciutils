@@ -14,7 +14,7 @@ import typing
 from collections import deque
 from typing import Union, List, Dict, Optional
 
-from sciutils.timer import Timer
+from .timer import Timer
 
 
 class RpcQueue(object):

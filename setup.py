@@ -29,6 +29,6 @@ setup(
       if entry.is_file() and entry.name.endswith('.py')
    ],
    ext_modules=cythonize(
-        ext_modules, annotate=False
+        ext_modules, annotate=True
    )
 )
