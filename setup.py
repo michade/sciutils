@@ -8,16 +8,22 @@ from setuptools import setup, Extension, find_packages
 ext_modules = [
     Extension(
         'chiapet.points_in_regions',
-        ['chiapet/points_in_regions.pyx'],
-        extra_compile_args=['-fopenmp'],  # TODO: Check if this is still required
-        extra_link_args=['-fopenmp']
+        ['chiapet/points_in_regions.pyx']
+        # extra_compile_args=['-fopenmp'],
+        # extra_link_args=['-fopenmp']
     )
 ]
 
 
+def _get_version(dir_):
+    with open(os.path.join(dir_, 'VERSION')) as version_file:
+        version = version_file.read().strip()
+    return version
+
+
 setup(
    name='sciutils',
-   version='0.8',
+   version=_get_version('.'),
    description='Various utilities for scientific and bioinformatics computing.',
    author='Michał Denkiewicz',
    author_email='michal.denkiewicz@gmail.com',
