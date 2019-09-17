@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-
+import inspect
 import os
 import argparse
 import logging
@@ -102,3 +102,11 @@ def setup_logger(args=None, loglevel=None, logfile=None):
         level=loglevel,
         filename=logfile
     )
+
+
+def pass_args_to_fun(fun, args):
+    args_dict = vars(args)
+    sig = inspect.signature(fun)
+    args_dict = {k: v for k, v in args_dict.items() if k in sig.parameters}
+    ba = sig.bind(**args_dict)
+    return fun(*ba.args, **ba.kwargs)
