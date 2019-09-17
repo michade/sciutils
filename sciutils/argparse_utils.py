@@ -104,8 +104,9 @@ def setup_logger(args=None, loglevel=None, logfile=None):
     )
 
 
-def pass_args_to_fun(fun, args):
+def pass_args_to_fun(fun, args, **xtra_args):
     args_dict = vars(args)
+    args_dict.update(xtra_args)
     sig = inspect.signature(fun)
     args_dict = {k: v for k, v in args_dict.items() if k in sig.parameters}
     ba = sig.bind(**args_dict)
