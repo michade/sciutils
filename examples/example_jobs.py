@@ -271,7 +271,15 @@ def logging_example():
     log = logging.getLogger()
     log.warning('Normal logger warning...')
 
-    with JobRunner(2, logging_handlers=logging.DEBUG) as runner:
+    logfile = './logging_test.txt'
+    if os.access('.', os.W_OK):
+        print('>>> Can write log file.')
+        handlers = JobRunner.basic_logging_handlers(logging.WARNING, logging.DEBUG, logfile)
+    else:
+        print('>>> Cannot write log file.')
+        handlers = JobRunner.basic_logging_handlers(logging.DEBUG)
+
+    with JobRunner(2, logging_handlers=handlers) as runner:
         runner.schedule_job(LoggingJob(), 'A', 3, 0.1)
         runner.schedule_job(LoggingJob(), 'B', 3, 0.1)
     print('Exited.')
@@ -307,12 +315,44 @@ def data_transfer_example():
     print('Exited.')
 
 
+class ProgressJob(Job):
+    def __init__(self, parts, delay, extra):
+        super(ProgressJob, self).__init__()
+        self.parts = parts
+        self.delay = delay
+        self.extra = extra
+
+    def run(self):
+        self.set_progress(0, self.parts)
+        for i in range(self.parts):
+            self.schedule_job(self.do_part, i)
+
+    def do_part(self, i: int):
+        time.sleep(self.delay)
+        self.increase_progress(1)
+        self.part_finished(i)
+
+    @local
+    def part_finished(self, i: int):
+        if i == 10:
+            self.increase_progress(0, self.extra)
+            for j in range(self.parts, self.parts + self.extra):
+                self.schedule_job(self.do_part, j)
+
+
+def progress_example():
+    with JobRunner(4, print_progress_interval=0.2) as runner:
+        runner.schedule_job(ProgressJob(20, 0.1, 5))
+        runner.schedule_job(ProgressJob(20, 0.1, 5))
+    print('Finished - progress example.')
+
+
 def main():
     mp.set_start_method('fork')  # unnecessary, but for the record (this is the default for linux)
     print(f'Main process pid={os.getpid()}, the start method is "{mp.get_start_method(True)}".')
-    print('SUM' + '=' * 40)
+    print('SUM ' + '=' * 40)
     sum_example()
-    print('CHAINS' + '=' * 40)
+    print('CHAINS ' + '=' * 40)
     chains_example()
     print('MERGE SORT ' + '=' * 40)
     merge_sort_example()
@@ -320,10 +360,12 @@ def main():
     shared_memory_merge_sort_example()
     print('EXCEPTION ' + '=' * 40)
     exception_example()
-    print('LOGGING ' + '=' * 40)
-    logging_example()
     print('DATA TRANSFER ' + '=' * 40)
     data_transfer_example()
+    print('PROGRESS ' + '=' * 40)
+    progress_example()
+    print('LOGGING ' + '=' * 40)
+    logging_example()
 
 
 if __name__ == "__main__":

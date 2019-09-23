@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import functools
 import inspect
+import itertools
 import multiprocessing as mp
 import os
 import traceback
@@ -11,10 +12,21 @@ import logging.handlers
 import sys
 import typing
 
-from collections import deque
-from typing import Union, List, Dict, Optional
+from collections import deque, OrderedDict, Counter
+from typing import Union, List, Dict, Optional, Tuple
 
 from .timer import Timer
+
+
+_LAST_UNIQUE_IDS = Counter()
+
+
+def get_pretty_unique_id(obj):
+    namespace = obj.__class__.__name__
+    global _LAST_UNIQUE_IDS
+    id_ = _LAST_UNIQUE_IDS[namespace]
+    _LAST_UNIQUE_IDS[namespace] += 1
+    return namespace, id_
 
 
 class RpcQueue(object):
@@ -28,6 +40,12 @@ class RpcQueue(object):
         self._is_finished = False
         self._n_producers = 0
         self._n_consumers = 0
+
+    def __getitem__(self, key):
+        return self._targets[key]
+
+    def __contains__(self, key):
+        return key in self._targets
 
     @property
     def is_finished(self):
@@ -131,15 +149,17 @@ local = RpcQueue.remote_method
 
 class Job(object):
     def __init__(self):
-        self.rpc_id = hash(self)
+        self.rpc_id = get_pretty_unique_id(self)
+        self._progress = 0
+        self._max_progress = 1
         self._worker: Optional[Worker] = None
         self._logger: Optional[logging.LoggingAdapter] = None
         self._timer = Timer()
         self._part_timer = Timer()
         self._is_started = False
 
-    def on_started(self, job_method):
-        self.logger.debug(f'Starting {job_method.__name__}.')
+    def on_started(self, run_info: str):
+        self.logger.debug(f'Starting:\t{run_info}')
         self._part_timer.reset()
         if not self._is_started:
             self._is_started = True
@@ -153,9 +173,20 @@ class Job(object):
             self.logger.debug(f'Starting.')
             self._timer.start()
 
-    def on_finished(self, job_method, ok: bool):
+    def on_finished(self, ok: bool, run_info: str):
         self._part_timer.stop()
-        self.logger.info(f'{"Finished" if ok else "Failed"} {job_method.__name__} in {self._part_timer.elapsed:.2f}s ({self._timer.elapsed:.2f}s total approx.)')
+        self.logger.info(f'{"Finished" if ok else "Failed"}:\t{run_info}\t[time={self._part_timer.elapsed:.2f}s, total={self._timer.elapsed:.2f}s]')
+
+    def get_run_info(self, method, *args, **kwargs) -> str:
+        extra_info = self.get_run_extra_info(method, *args, **kwargs)
+        return f'{method.__name__}({extra_info})'
+
+    def get_run_extra_info(self, method, *args, **kwargs) -> str:
+        s = ', '.join(itertools.chain(
+            (str(a) for a in args),
+            (f'{k}={v}' for k, v in kwargs.items())
+        ))
+        return s
 
     def finished(self):
         self.on_finished_local()
@@ -166,8 +197,9 @@ class Job(object):
             self._timer.stop()
             self.logger.info(f'Finished in {self._timer.elapsed:.2}s')
 
-    def get_job_id(self):
-        return self.__class__.__name__
+    @property
+    def name(self) -> str:
+        return f'{self.__class__.__name__}[{self.rpc_id[1]}]'
 
     @property
     def worker(self) -> Worker:
@@ -184,7 +216,7 @@ class Job(object):
                 worker.get_base_logger(),
                 {
                     'worker_id': worker.worker_id,
-                    'job_id': self.get_job_id()
+                    'job_name': self.name
                 }
             )
             self._logger = adapter
@@ -223,28 +255,46 @@ class Job(object):
         for attr, val in zip(attrs, merged_data):
             setattr(self, attr, val)
 
+    @property
+    def progress(self):  # Note: values on workers will be null
+        return self._progress
+
+    @property
+    def max_progress(self):  # Note: values on workers will be null
+        return self._max_progress
+
+    @local
+    def set_progress(self, progress: int, max_progress: int):  # should be called before anything else
+        self._progress = progress
+        self._max_progress = max_progress
+
+    @local
+    def increase_progress(self, progress_delta: int, max_progress_delta: int = 0):
+        self._progress += progress_delta
+        self._max_progress += max_progress_delta
+
 
 class Worker(object):
     def __init__(
-            self, worker_id: int,
+            self,
             job_queue: RpcQueue, msg_queue: RpcQueue, log_queue: mp.Queue,
             suppress_exceptions=False
     ):
+        self.rpc_id = get_pretty_unique_id(self)
+        self._worker_id = self.rpc_id[1]
         self._pid = None
-        self._worker_id = worker_id
         self._chained_jobs = None
-        self.rpc_id = worker_id
         self._job_queue = job_queue
         self._msg_queue = msg_queue
         self._runner: Union[None, JobRunner] = None
         self._suppress_exceptions = suppress_exceptions
 
-        self._base_logger = logging.Logger(f'JobLogger-{worker_id}')
+        self._base_logger = logging.Logger(f'JobLogger-{self._worker_id}')
         handler = logging.handlers.QueueHandler(log_queue)
         self._base_logger.addHandler(handler)
         adapter = logging.LoggerAdapter(self.get_base_logger(), {
-            'worker_id': worker_id,
-            'job_id': ''
+            'worker_id': self.worker_id,
+            'job_name': ''
         })
         self._logger = adapter
 
@@ -286,10 +336,10 @@ class Worker(object):
                 break
             self._chained_jobs.append(msg)
             while len(self._chained_jobs) > 0:
-                msg = self._chained_jobs.popleft()
-                if not self._run_job(*msg):
+                job_method, args, kwargs = self._chained_jobs.popleft()
+                if not self._run_job(job_method, args, kwargs):
                     self._chained_jobs.clear()
-            self.job_finished()
+            self.job_finished(job_method.__self__.rpc_id)
         self.logger.debug('Worker finished.')
         self.finished()
 
@@ -300,10 +350,11 @@ class Worker(object):
             job.worker = self
             self._msg_queue.wrap_target(job)
         try:
-            job.on_started(job_method)
+            extra_info = job.get_run_info(job_method, *args, **kwargs)
+            job.on_started(extra_info)
             job_method(*args, **kwargs)
             ok = True
-            job.on_finished(job_method, ok)
+            job.on_finished(ok, extra_info)
         except Exception:
             e_type, e_value, e_traceback = sys.exc_info()
             text = traceback.format_exception(e_type, e_value, e_traceback)
@@ -321,14 +372,18 @@ class Worker(object):
     def print_remote_traceback(self, text):
         sys.stderr.writelines(text)
 
-    def chain_job(self, method, *args, **kwargs):
-        self._chained_jobs.append((method, args, kwargs))
+    def chain_job(self, job_method, *args, **kwargs):
+        if hasattr(job_method, 'run'):
+            job_method = job_method.run
+        self._chained_jobs.append((job_method, args, kwargs))
 
-    def schedule_job(self, method, *args, **kwargs):
-        self.job_started()
-        if hasattr(method, 'run'):
-            method = method.run
-        self._job_queue.put(method, *args, **kwargs)
+    def schedule_job(self, job_method, *args, **kwargs):
+        if hasattr(job_method, 'run'):
+            job_method = job_method.run
+        self.job_started(job_method.__self__.rpc_id)
+        if hasattr(job_method, 'run'):
+            job_method = job_method.run
+        self._job_queue.put(job_method, *args, **kwargs)
 
     def print(self, *objs, info=True) -> None:
         texts = []
@@ -342,12 +397,12 @@ class Worker(object):
         print(*texts)
 
     @local
-    def job_started(self) -> None:
-        self.runner.on_job_started()
+    def job_started(self, job_id) -> None:
+        self.runner.on_job_started(job_id)
 
     @local
-    def job_finished(self) -> None:
-        self.runner.on_job_finished()
+    def job_finished(self, job_id) -> None:
+        self.runner.on_job_finished(job_id)
 
     @local
     def finished(self) -> None:
@@ -368,15 +423,15 @@ class WorkerProcess(mp.Process):
 
 
 class JobRunner(object):
-    rpc_id = 0
-
     def __init__(
             self,
             n_workers: Optional[int],
             suppress_exceptions: bool = False,
             logging_handlers: Union[None, str, int, List] = None,
+            print_progress_interval=None,
             _queue_class=mp.Queue
     ):
+        self.rpc_id = get_pretty_unique_id(self)
         if n_workers is None or n_workers == 0:
             n_workers = mp.cpu_count()
         self._n_workers = n_workers
@@ -390,6 +445,10 @@ class JobRunner(object):
         self._local_worker = None
         self._suppress_exceptions = suppress_exceptions
         self._logger = logging.getLogger('JobRunner')
+        self._tracked_jobs = OrderedDict()
+        self._progress_timer = Timer()
+        self._total_timer = Timer()
+        self._print_progress_interval = print_progress_interval
 
     @property
     def is_started(self):
@@ -400,13 +459,26 @@ class JobRunner(object):
         return self._logger
 
     @staticmethod
-    def basic_logging_handlers(level=None):
-        ch = logging.StreamHandler()
-        if level is not None:
-            ch.setLevel(level)
-        fmt = logging.Formatter('%(levelname)s\t%(worker_id)s\t%(job_id)s:\t%(message)s')
-        ch.setFormatter(fmt)
-        return [ch]
+    def basic_logging_handlers(console_level=None, file_level=None, filename=None):
+        handlers = []
+        if console_level is not None:
+            ch = logging.StreamHandler()
+            ch.setLevel(console_level)
+            fmt = logging.Formatter('%(levelname)s\t%(worker_id)s\t%(job_name)s:\t%(message)s')
+            ch.setFormatter(fmt)
+            handlers.append(ch)
+        if filename is not None:
+            if file_level is None:
+                if console_level is None:
+                    file_level = logging.INFO
+                else:
+                    file_level = console_level
+            fh = logging.FileHandler(filename, mode='w')
+            fh.setLevel(file_level)
+            fmt = logging.Formatter('%(levelname)s\t%(worker_id)s\t%(job_name)s:\t%(message)s')
+            fh.setFormatter(fmt)
+            handlers.append(fh)
+        return handlers
 
     def _config_loggers(self):
         if self._logging_handlers is None:
@@ -423,11 +495,15 @@ class JobRunner(object):
     def start(self) -> None:
         if self.is_started:
             return
+        self._total_timer.start()
+        self._progress_timer.start()
         # create workers
-        self._local_worker = Worker(0, self._job_queue, self._msg_queue, self._log_queue, self._suppress_exceptions)
+        self._local_worker = Worker(self._job_queue, self._msg_queue, self._log_queue, self._suppress_exceptions)
         self._worker_processes = [
-            WorkerProcess(Worker(i, self._job_queue, self._msg_queue, self._log_queue, self._suppress_exceptions))
-            for i in range(1, self._n_workers + 1)
+            WorkerProcess(
+                Worker(self._job_queue, self._msg_queue, self._log_queue, self._suppress_exceptions)
+            )
+            for _ in range(1, self._n_workers + 1)
         ]
 
         # do fork
@@ -462,12 +538,13 @@ class JobRunner(object):
             method = job.run
         else:
             method = job
-            job = method.__self__
+            job: Job = method.__self__
         self._job_queue.register(job)
         self._msg_queue.register(job)
+        self._tracked_jobs[job.rpc_id] = job
         if self.is_started:
-            self.logger.info(f'Scheduling job: {job.get_job_id()}...')
-            self.on_job_started()
+            self.logger.info(f'Scheduling job: {job.name}...')
+            self.on_job_started(job)
             job.worker = self._local_worker
             self._job_queue.put(method, *args, **kwargs)
         else:
@@ -477,6 +554,10 @@ class JobRunner(object):
         msg = self._msg_queue.get()
         method, args, kwargs = msg
         method(*args, **kwargs)
+        if self._print_progress_interval is not None and self._progress_timer.elapsed > self._print_progress_interval:
+            self._progress_timer.reset()
+            self._progress_timer.start()
+            self.print_progress()
 
     def finish_jobs(self) -> None:
         self.logger.debug(f'Waiting for {self._job_queue.n_producers} jobs to finish...')
@@ -487,6 +568,14 @@ class JobRunner(object):
         self.logger.debug(f'Waiting for {self._msg_queue.n_producers} workers to finish sending messages...')
         while self._msg_queue.n_producers > 0:
             self._process_message()
+
+    def print_progress(self):
+        print(f'Running {len(self._tracked_jobs)} jobs. Total time: {self._total_timer.elapsed:.2}s.')
+        for job in self._tracked_jobs.values():
+            prog = job.progress
+            max_prog = job.max_progress
+            percent = 100.0 * prog / max_prog
+            print(f'{job.name}:\t\t{percent:6.2f}% [{prog}/{max_prog}]')
 
     def close(self) -> None:
         self.logger.debug(f'Shutting down job queue...')
@@ -499,12 +588,16 @@ class JobRunner(object):
         self.logger.debug(f'Joining worker processes...')
         for process in self._worker_processes:
             process.join()
+        self._progress_timer.stop()
+        self._total_timer.stop()
+        if self._print_progress_interval is not None:
+            self.print_progress()
         self.logger.debug(f'Runner closed.')
 
-    def on_job_started(self) -> None:
+    def on_job_started(self, job_id) -> None:
         self._job_queue.add_producer()
 
-    def on_job_finished(self) -> None:
+    def on_job_finished(self, job_id) -> None:
         self._job_queue.remove_producer()
 
     def on_worker_started(self) -> None:
