@@ -72,14 +72,16 @@ def valid_new_file_arg(path):
     if os.path.exists(path):
         if not os.path.isfile(path):
             raise argparse.ArgumentTypeError('Not a regular file: %s' % path)
+        if not os.access(path, os.W_OK | os.X_OK):
+            raise argparse.ArgumentTypeError('File is not writable: %s' % path)
     else:
         base, last = os.path.split(path)
         if len(base) == 0:
             base = '.'
         if not os.path.exists(base):
             raise argparse.ArgumentTypeError('Directory does not exist: %s' % base)
-    if not os.access(path, os.W_OK | os.X_OK):
-        raise argparse.ArgumentTypeError('Path is not writable: %s' % path)
+        if not os.access(base, os.W_OK | os.X_OK):
+            raise argparse.ArgumentTypeError('Path is not writable: %s' % path)
     return path
 
 
@@ -94,13 +96,14 @@ def logger_args():
     return parser
 
 
-def setup_logger(args=None, loglevel=None, logfile=None):
+def setup_logger(args=None, loglevel=None, logfile=None, filemode='w'):
     if args is not None:
         loglevel = args.loglevel
         logfile = args.logfile
     logging.basicConfig(
         level=loglevel,
-        filename=logfile
+        filename=logfile,
+        filemode=filemode
     )
 
 
