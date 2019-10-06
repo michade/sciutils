@@ -9,7 +9,7 @@ import random
 import time
 import numpy as np
 
-from sciutils.jobs import Job, JobRunner, local, CursesProgressTracker
+from sciutils.jobs import Job, JobRunner, local, create_progress_tracker
 from sciutils.timer import Timer
 
 
@@ -341,8 +341,9 @@ class ProgressJob(Job):
 
 
 def progress_example():
-    dt = 0.2
-    with JobRunner(4, progress_tracker=CursesProgressTracker(dt, f'Progress example dt={dt:.3f}s')) as runner:
+    interval = 0.2
+    tracker = create_progress_tracker(interval, f'Progress example interval={interval:.3f}s')
+    with JobRunner(4, progress_tracker=tracker) as runner:
         runner.schedule_job(ProgressJob(20, 0.1, 5))
         runner.schedule_job(ProgressJob(20, 0.1, 5))
     print('Finished - progress example.')
@@ -351,22 +352,22 @@ def progress_example():
 def main():
     mp.set_start_method('fork')  # unnecessary, but for the record (this is the default for linux)
     print(f'Main process pid={os.getpid()}, the start method is "{mp.get_start_method(True)}".')
-    print('SUM ' + '=' * 40)
-    sum_example()
-    print('CHAINS ' + '=' * 40)
-    chains_example()
-    print('MERGE SORT ' + '=' * 40)
-    merge_sort_example()
-    print('SHARED MEMORY MERGE SORT ' + '=' * 40)
-    shared_memory_merge_sort_example()
-    print('EXCEPTION ' + '=' * 40)
-    exception_example()
-    print('DATA TRANSFER ' + '=' * 40)
-    data_transfer_example()
+    # print('SUM ' + '=' * 40)
+    # sum_example()
+    # print('CHAINS ' + '=' * 40)
+    # chains_example()
+    # print('MERGE SORT ' + '=' * 40)
+    # merge_sort_example()
+    # print('SHARED MEMORY MERGE SORT ' + '=' * 40)
+    # shared_memory_merge_sort_example()
+    # print('EXCEPTION ' + '=' * 40)
+    # exception_example()
+    # print('DATA TRANSFER ' + '=' * 40)
+    # data_transfer_example()
     print('PROGRESS ' + '=' * 40)
     progress_example()
-    print('LOGGING ' + '=' * 40)
-    logging_example()
+    # print('LOGGING ' + '=' * 40)
+    # logging_example()
 
 
 if __name__ == "__main__":
