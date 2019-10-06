@@ -9,7 +9,7 @@ import random
 import time
 import numpy as np
 
-from sciutils.jobs import Job, JobRunner, local
+from sciutils.jobs import Job, JobRunner, local, CursesProgressTracker
 from sciutils.timer import Timer
 
 
@@ -341,7 +341,8 @@ class ProgressJob(Job):
 
 
 def progress_example():
-    with JobRunner(4, print_progress_interval=0.2) as runner:
+    dt = 0.2
+    with JobRunner(4, progress_tracker=CursesProgressTracker(dt, f'Progress example dt={dt:.3f}s')) as runner:
         runner.schedule_job(ProgressJob(20, 0.1, 5))
         runner.schedule_job(ProgressJob(20, 0.1, 5))
     print('Finished - progress example.')

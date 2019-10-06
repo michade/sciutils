@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+
 import os
 from itertools import chain
 from Cython.Build import cythonize
@@ -22,19 +24,19 @@ def _get_version(dir_):
 
 
 setup(
-   name='sciutils',
-   version=_get_version('.'),
-   description='Various utilities for scientific and bioinformatics computing.',
-   author='Michał Denkiewicz',
-   author_email='michal.denkiewicz@gmail.com',
-   packages=find_packages(),
-   install_requires=['numpy', 'pandas', 'networkx', 'cython'],
-   scripts=[
-      entry.path for entry in
-      chain(os.scandir('examples'), os.scandir('scripts'))
-      if entry.is_file() and entry.name.endswith('.py')
-   ],
-   ext_modules=cythonize(
-        ext_modules, annotate=True
-   )
+    name='sciutils',
+    version=_get_version('.'),
+    description='Various utilities for scientific and bioinformatics computing.',
+    author='Michał Denkiewicz',
+    author_email='michal.denkiewicz@gmail.com',
+    packages=find_packages(),
+    install_requires=['numpy', 'pandas', 'networkx', 'cython'],
+    scripts=[
+       entry.path for entry in
+       chain(os.scandir('examples'), os.scandir('scripts'))
+       if entry.is_file() and entry.name.endswith('.py')
+    ],
+    ext_modules=cythonize(
+         ext_modules, annotate=True
+    )
 )
