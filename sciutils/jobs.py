@@ -455,6 +455,7 @@ class ProgressTracker(object):
 
     def print_line(self, line):
         sys.stdout.write(line)
+        sys.stdout.write('\n')
 
     def print(self, jobs):
         header = self.get_header()
@@ -473,6 +474,17 @@ class ProgressTracker(object):
     def stop(self):
         self._progress_timer.stop()
         self._total_timer.stop()
+
+
+class QuietProgressTracker(ProgressTracker):
+    def __init__(self, print_progress_interval, header):
+        super(QuietProgressTracker, self).__init__(print_progress_interval, header)
+
+    def print(self, jobs):
+        pass
+
+    def flush(self):
+        pass
 
 
 class CursesProgressTracker(ProgressTracker):
@@ -518,6 +530,17 @@ class CursesProgressTracker(ProgressTracker):
     def stop(self):
         super(CursesProgressTracker, self).stop()
         self._shutdown_curses()
+
+
+def create_progress_tracker(interval, header, quiet=False):
+    if quiet:
+        return QuietProgressTracker(interval, header)
+    try:
+        tracker = CursesProgressTracker(interval, header)
+    except curses.error:
+        logging.warning("Unable to initialize curses.")
+        tracker = ProgressTracker(interval, header)
+    return tracker
 
 
 class JobRunner(object):
