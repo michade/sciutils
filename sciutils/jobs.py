@@ -11,6 +11,7 @@ import logging
 import logging.handlers
 import sys
 import typing
+import curses
 
 from collections import deque, OrderedDict, Counter
 from typing import Union, List, Dict, Optional, Tuple
@@ -422,13 +423,110 @@ class WorkerProcess(mp.Process):
         self.worker.run()
 
 
+class ProgressTracker(object):
+    def __init__(self, print_progress_interval, header):
+        self._progress_timer = Timer()
+        self._total_timer = Timer()
+        self._print_progress_interval = print_progress_interval
+        self._header = header
+
+    def start(self):
+        self._total_timer.start()
+        self._progress_timer.start()
+
+    def update(self, jobs):
+        if self._print_progress_interval is not None and self._progress_timer.elapsed > self._print_progress_interval:
+            self._progress_timer.reset()
+            self._progress_timer.start()
+            self.print(jobs)
+
+    def get_header(self):
+        return self._header
+
+    def get_summary_text(self, jobs):
+        return f'Running {len(jobs)} jobs. Total time: {self._total_timer.elapsed:.2f}s.'
+
+    def get_job_info(self, job):
+        progress = job.progress
+        max_progress = job.max_progress
+        percent = 100.0 * progress / max_progress
+        job_info = f'{job.name}: {percent:6.2f}% [{progress}/{max_progress}]'
+        return job_info
+
+    def print_line(self, line):
+        sys.stdout.write(line)
+
+    def print(self, jobs):
+        header = self.get_header()
+        if header:
+            self.print_line(header)
+        summary = self.get_summary_text(jobs)
+        self.print_line(summary)
+        for job in jobs:
+            job_info = self.get_job_info(job)
+            self.print_line(job_info)
+        self.flush()
+
+    def flush(self):
+        sys.stdout.flush()
+
+    def stop(self):
+        self._progress_timer.stop()
+        self._total_timer.stop()
+
+
+class CursesProgressTracker(ProgressTracker):
+    def __init__(self, print_progress_interval, header):
+        super(CursesProgressTracker, self).__init__(print_progress_interval, header)
+        self._stdscr = None
+        self._window = None
+        self._last_line_count = 0
+
+    def _init_curses(self):
+        self._stdscr = curses.initscr()
+        height, width = self._stdscr.getmaxyx()
+        self._window = curses.newwin(height, width)
+
+    def start(self):
+        self._init_curses()
+        super(CursesProgressTracker, self).start()
+
+    def print(self, jobs):
+        self._window.erase()
+        super(CursesProgressTracker, self).print(jobs)
+        self._last_line_count = 1 + len(jobs)
+
+    def flush(self):
+        self._window.refresh()
+
+    def print_line(self, line):
+        self._window.addstr(line)
+        self._window.addstr('\n')
+
+    def _shutdown_curses(self):
+        if self._stdscr is not None:
+            y, _ = self._window.getyx()
+            outputs = '\n'.join(
+                self._window.instr(i, 0).decode('ascii')
+                for i in range(y)
+            )
+            curses.endwin()
+            self._stdscr = None
+            self._window = None
+            print(outputs)
+
+    def stop(self):
+        super(CursesProgressTracker, self).stop()
+        self._shutdown_curses()
+
+
 class JobRunner(object):
     def __init__(
             self,
             n_workers: Optional[int],
             suppress_exceptions: bool = False,
             logging_handlers: Union[None, str, int, List] = None,
-            print_progress_interval=None,
+            progress_tracker=None,
             _queue_class=mp.Queue
     ):
         self.rpc_id = get_pretty_unique_id(self)
@@ -446,9 +544,10 @@ class JobRunner(object):
         self._suppress_exceptions = suppress_exceptions
         self._logger = logging.getLogger('JobRunner')
         self._tracked_jobs = OrderedDict()
-        self._progress_timer = Timer()
-        self._total_timer = Timer()
-        self._print_progress_interval = print_progress_interval
+        if progress_tracker is None:
+            self._progress_tracker = ProgressTracker(0.5, None)
+        else:
+            self._progress_tracker = progress_tracker
 
     @property
     def is_started(self):
@@ -495,8 +594,7 @@ class JobRunner(object):
     def start(self) -> None:
         if self.is_started:
             return
-        self._total_timer.start()
-        self._progress_timer.start()
+        self._progress_tracker.start()
         # create workers
         self._local_worker = Worker(self._job_queue, self._msg_queue, self._log_queue, self._suppress_exceptions)
         self._worker_processes = [
@@ -554,10 +652,7 @@ class JobRunner(object):
         msg = self._msg_queue.get()
         method, args, kwargs = msg
         method(*args, **kwargs)
-        if self._print_progress_interval is not None and self._progress_timer.elapsed > self._print_progress_interval:
-            self._progress_timer.reset()
-            self._progress_timer.start()
-            self.print_progress()
+        self._progress_tracker.update(self._tracked_jobs.values())
 
     def finish_jobs(self) -> None:
         self.logger.debug(f'Waiting for {self._job_queue.n_producers} jobs to finish...')
@@ -568,14 +663,6 @@ class JobRunner(object):
         self.logger.debug(f'Waiting for {self._msg_queue.n_producers} workers to finish sending messages...')
         while self._msg_queue.n_producers > 0:
             self._process_message()
-
-    def print_progress(self):
-        print(f'Running {len(self._tracked_jobs)} jobs. Total time: {self._total_timer.elapsed:.2}s.')
-        for job in self._tracked_jobs.values():
-            prog = job.progress
-            max_prog = job.max_progress
-            percent = 100.0 * prog / max_prog
-            print(f'{job.name}:\t\t{percent:6.2f}% [{prog}/{max_prog}]')
 
     def close(self) -> None:
         self.logger.debug(f'Shutting down job queue...')
@@ -588,10 +675,8 @@ class JobRunner(object):
         self.logger.debug(f'Joining worker processes...')
         for process in self._worker_processes:
             process.join()
-        self._progress_timer.stop()
-        self._total_timer.stop()
-        if self._print_progress_interval is not None:
-            self.print_progress()
+        self._progress_tracker.print(self._tracked_jobs.values())
+        self._progress_tracker.stop()
         self.logger.debug(f'Runner closed.')
 
     def on_job_started(self, job_id) -> None:

@@ -30,7 +30,7 @@ def main() -> None:
     parser.add_argument('output_dir', help='Output directory for split data.')
     parser.add_argument('--celline', default='GM12878')
     parser.add_argument('--protein', default='CTCF')
-    parser.add_argument('--petcount', default=4)
+    parser.add_argument('--petcount', type=int, default=4)
     args = parser.parse_args()
 
     input_dir = args.data_dir
