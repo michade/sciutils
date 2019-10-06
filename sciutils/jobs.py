@@ -1,23 +1,21 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import curses
 import functools
 import inspect
 import itertools
-import multiprocessing as mp
-import os
-import traceback
 import logging
 import logging.handlers
+import multiprocessing as mp
+import os
 import sys
+import traceback
 import typing
-import curses
-
 from collections import deque, OrderedDict, Counter
-from typing import Union, List, Dict, Optional, Tuple
+from typing import Union, List, Dict, Optional
 
 from .timer import Timer
-
 
 _LAST_UNIQUE_IDS = Counter()
 
@@ -493,15 +491,12 @@ class CursesProgressTracker(ProgressTracker):
         self._stdscr = None
         self._window = None
         self._last_line_count = 0
+        self._init_curses()
 
     def _init_curses(self):
         self._stdscr = curses.initscr()
         height, width = self._stdscr.getmaxyx()
         self._window = curses.newwin(height, width)
-
-    def start(self):
-        self._init_curses()
-        super(CursesProgressTracker, self).start()
 
     def print(self, jobs):
         self._window.erase()
